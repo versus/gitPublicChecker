@@ -15,22 +15,39 @@ import (
 	"time"
 )
 
-const ConfigFile = "config.yaml"
-
 type Config struct {
-	Repos    []string `yaml:"urls,flow"`
+	PublicRepos struct {
+		Url []string `yaml:"urls,flow"`
+	} `yaml:"public"`
+	PrivateRepos struct {
+		Url []string `yaml:"urls,flow"`
+	} `yaml:"private"`
 	Opsgenie struct {
 		Api string `yaml:"api"`
 	} `yaml:"opsgenie"`
 }
 
 var (
-	config    Config
-	gitClient *http.Client
+	config      Config
+	gitClient   *http.Client
+	timeout     = time.Second * 15
+	verboseFlag bool
+	configFile  = "./config.yaml"
+	helpFlag    bool
+	quietFlag   bool
+	excludeFlag string
 )
 
 func init() {
-	configFile, err := ioutil.ReadFile(ConfigFile)
+
+	getopt.Flag(&verboseFlag, 'v', "be verbose").SetOptional()
+	getopt.FlagLong(&configFile, "config", 'f', "path to config file").SetOptional()
+	getopt.FlagLong(&timeout, "timeout", 't', "git client connect timeout ").SetOptional()
+	getopt.FlagLong(&helpFlag, "help", 'h', "Displays help message").SetOptional()
+	getopt.FlagLong(&excludeFlag, "exclude", 'e', "", "for exclude a repository from check, separated by coma").SetOptional()
+	getopt.FlagLong(&quietFlag, "quiet", 'q', "see only warnings without additional information").SetOptional()
+
+	configFile, err := ioutil.ReadFile(configFile)
 	if err != nil {
 		fmt.Printf("Error reading config file: %s\n", err)
 		os.Exit(1)
@@ -55,19 +72,17 @@ func init() {
 }
 
 func Execute() {
-	helpFlag := getopt.BoolLong("help", 'h', "Displays help message")
-	excludeFlag := getopt.StringLong("exclude", 'e', "", "for exclude a file from check")
-	quietFlag := getopt.BoolLong("quiet", 'q', "see only warnings without additional information")
 
 	getopt.Parse()
 	args := getopt.Args()
-	if len(args) > 1 || *helpFlag {
+	if len(args) > 1 || helpFlag {
 		UsageMessage()
 	}
 
 	ShowRepos(config)
-	fmt.Println(*excludeFlag, "tail:", args, *quietFlag)
-	CheckRepo(config.Repos[0])
+	fmt.Println("tail:", args, excludeFlag)
+	CheckRepo(config.PrivateRepos.Url[0])
+	CheckRepo(config.PublicRepos.Url[0])
 }
 
 func ShowRepos(cfg Config) {
