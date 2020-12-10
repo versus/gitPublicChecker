@@ -81,8 +81,12 @@ func Execute() {
 
 	ShowRepos(config)
 	fmt.Println("tail:", args, excludeFlag)
-	CheckRepo(config.PrivateRepos.Url[0])
-	CheckRepo(config.PublicRepos.Url[0])
+	for i := range config.PrivateRepos.Url {
+		CheckRepo(config.PrivateRepos.Url[i], true)
+	}
+	for i := range config.PrivateRepos.Url {
+		CheckRepo(config.PublicRepos.Url[i], false)
+	}
 }
 
 func ShowRepos(cfg Config) {
@@ -94,18 +98,29 @@ func UsageMessage() {
 	os.Exit(0)
 }
 
-func CheckRepo(url string) {
+func CheckRepo(url string, condition bool) (int, error) {
 	client.InstallProtocol("https", githttp.NewClient(gitClient))
 	// Clone repository using the new client if the protocol is https://
 	r, err := git.Clone(memory.NewStorage(), nil, &git.CloneOptions{URL: url})
 	if err != nil {
 		if err.Error() == "authentication required" {
 			fmt.Printf("Repo still private: %s\n", err)
+			if condition {
+				return 1, nil
+			}
+			return 0, nil
 		} else {
 			fmt.Printf("ERROR: %s\n", err)
+			return -1, err
 		}
-		return
 	}
 	head, err := r.Head()
 	fmt.Println(head.Hash())
+	if err != nil {
+		return -1, err
+	}
+	if condition {
+		return 1, nil
+	}
+	return 0, nil
 }
