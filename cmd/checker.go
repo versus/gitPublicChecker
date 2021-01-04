@@ -4,28 +4,15 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/transport/client"
-	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/pborman/getopt/v2"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
-
-type Config struct {
-	PublicRepos struct {
-		Url []string `yaml:"urls,flow"`
-	} `yaml:"public"`
-	PrivateRepos struct {
-		Url []string `yaml:"urls,flow"`
-	} `yaml:"private"`
-	Opsgenie struct {
-		Api string `yaml:"api"`
-	} `yaml:"opsgenie"`
-}
 
 var (
 	config      Config
@@ -71,26 +58,8 @@ func init() {
 
 }
 
-func Execute() {
-
-	getopt.Parse()
-	args := getopt.Args()
-	if len(args) > 1 || helpFlag {
-		UsageMessage()
-	}
-
-	ShowRepos(config)
-	fmt.Println("tail:", args, excludeFlag)
-	for i := range config.PrivateRepos.Url {
-		CheckRepo(config.PrivateRepos.Url[i], true)
-	}
-	for i := range config.PrivateRepos.Url {
-		CheckRepo(config.PublicRepos.Url[i], false)
-	}
-}
-
 func ShowRepos(cfg Config) {
-	fmt.Printf("Result: %v\n", cfg)
+	fmt.Printf("%v\n", cfg)
 }
 
 func UsageMessage() {
@@ -98,29 +67,31 @@ func UsageMessage() {
 	os.Exit(0)
 }
 
-func CheckRepo(url string, condition bool) (int, error) {
-	client.InstallProtocol("https", githttp.NewClient(gitClient))
+func checkRepo(url string, exp int, wg *sync.WaitGroup, c chan GitCheckResult) {
 	// Clone repository using the new client if the protocol is https://
+	var err error
+	var ret int
+	var check bool = false
+
 	r, err := git.Clone(memory.NewStorage(), nil, &git.CloneOptions{URL: url})
 	if err != nil {
 		if err.Error() == "authentication required" {
-			fmt.Printf("Repo still private: %s\n", err)
-			if condition {
-				return 1, nil
-			}
-			return 0, nil
+			ret = PRIVATE
 		} else {
-			fmt.Printf("ERROR: %s\n", err)
-			return -1, err
+			ret = ERROR
+		}
+	} else {
+		_, err = r.Head()
+		//fmt.Println(head.Hash())
+		if err != nil {
+			ret = ERROR
+		} else {
+			ret = PUBLIC
 		}
 	}
-	head, err := r.Head()
-	fmt.Println(head.Hash())
-	if err != nil {
-		return -1, err
+	if ret == exp {
+		check = true
 	}
-	if condition {
-		return 1, nil
-	}
-	return 0, nil
+	c <- NewGitChecker(url, exp, ret, err, check)
+	wg.Done()
 }
